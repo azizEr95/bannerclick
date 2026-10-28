@@ -5,7 +5,8 @@ For every domain (in this order, a domain drops out at the first failing step):
      status is < 400 or a typical bot block (403, 429, 503), since the browser may still get through.
   2. robots.txt of the final host allows the start page for user agent "*" (decided with Protego,
      RFC 9309). What Python's urllib.robotparser (used by Matte et al.) would decide is stored too.
-  3. Firefox with a fresh profile loads the page (reachable = loaded in the browser);
+  3. Firefox with a fresh profile loads the page (reachable = loaded in the browser). Block pages
+     (Akamai "Zugriff verweigert", Cloudflare "Just a moment", ...) are marked bot_blocked;
      __tcfapi('ping') is polled for up to TCF_WAIT seconds, until the CMP reports cmpLoaded.
      The API is found as __tcfapi function or, if only the __tcfapiLocator frame exists, via postMessage.
 Redirects are not excluded but marked: final domain, other domain, other TLD, and duplicates
@@ -35,6 +36,7 @@ from protego import Protego
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
 from tcfmeasure import config
+from tcfmeasure.botblock import check_page
 from tcfmeasure.browser import browser_versions, start_firefox
 from tcfmeasure.run_metadata import new_metadata, write_metadata
 
@@ -53,7 +55,7 @@ COLUMNS = [
     # 2. robots.txt
     "robots_url", "robots_status", "robots_allowed", "robots_allowed_urllib",
     # 3. Browser and TCF
-    "reachable", "browser_error", "browser_final_url", "page_title",
+    "reachable", "browser_error", "browser_final_url", "page_title", "bot_blocked",
     "has_tcfapi", "has_locator", "ping_via", "seconds_to_tcf", "seconds_to_cmp_loaded",
     "cmp_loaded", "cmp_status", "display_status", "cmp_id", "cmp_version",
     "gdpr_applies", "tcf_policy_version", "api_version", "gvl_version", "ping_json",
@@ -180,9 +182,9 @@ def check_tcf(driver, url):
 
     try:
         result["browser_final_url"] = driver.current_url
-        result["page_title"] = driver.title  # helps to spot bot-block pages ("Access denied")
     except WebDriverException:
         pass
+    result["page_title"], result["bot_blocked"] = check_page(driver)
     if last:
         result.update(ping_fields(last))
     return result
@@ -306,6 +308,7 @@ FUNNEL_STEPS = [
     ("HTTP < 400 or bot block (403/429/503)", worth_a_browser_try),
     ("robots.txt allows (Protego)", lambda row: row["robots_allowed"]),
     ("reachable (loaded in browser)", lambda row: row["reachable"]),
+    ("not bot-blocked", lambda row: not row["bot_blocked"]),
     ("TCF API present (__tcfapi or locator)", lambda row: row["has_tcfapi"] or row["has_locator"]),
     ("ping answered", lambda row: row["ping_via"] is not None),
     ("cmpLoaded", lambda row: row["cmp_loaded"]),
@@ -340,6 +343,9 @@ def notes(rows):
          "domains": sum(1 for r in robots_checked if r["robots_allowed"] == 0 and r["robots_allowed_urllib"] == 1)},
         {"note": "HTTP bot block (403/429/503), but loaded in browser",
          "domains": count(lambda r: r["http_status"] in BOT_BLOCK_STATUSES and r["reachable"] == 1)},
+        {"note": "... of which the browser also got a block page",
+         "domains": count(lambda r: r["http_status"] in BOT_BLOCK_STATUSES and r["bot_blocked"] == 1)},
+        {"note": "bot-blocked in browser (excluded)", "domains": count(lambda r: r["bot_blocked"] == 1)},
         {"note": "redirect to other domain", "domains": count(lambda r: r["redirect_other_domain"] == 1)},
         {"note": "redirect to other TLD", "domains": count(lambda r: r["redirect_other_tld"] == 1)},
         {"note": "duplicate final domain", "domains": count(lambda r: r["duplicate_of"] is not None)},

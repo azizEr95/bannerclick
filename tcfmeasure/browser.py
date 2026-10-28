@@ -21,14 +21,18 @@ def firefox_binary(binary=None):
     return None
 
 
-def start_firefox(binary=None, geckodriver=None, headless=True):
+def start_firefox(binary=None, geckodriver=None, headless=True, page_load_strategy="normal"):
+    """page_load_strategy "eager" returns after DOMContentLoaded, so the TCF listener can be
+    registered earlier."""
     options = Options()
     if headless:
         options.add_argument("-headless")
     binary = firefox_binary(binary)
     if binary:
         options.binary_location = binary
+    options.page_load_strategy = page_load_strategy
     options.set_preference("general.useragent.override", config.USER_AGENT)
+    options.set_preference("intl.accept_languages", config.ACCEPT_LANGUAGES)
 
     geckodriver = geckodriver or os.environ.get("TCF_GECKODRIVER")
     service = Service(executable_path=geckodriver) if geckodriver else Service()

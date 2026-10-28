@@ -1,3 +1,4 @@
 selenium==4.16.0
 protego==0.7.0
 tldextract==5.4.0
+beautifulsoup4==4.12.2
