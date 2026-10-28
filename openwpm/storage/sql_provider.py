@@ -20,6 +20,8 @@ from datetime import datetime
 import traceback
 
 SCHEMA_FILE = os.path.join(os.path.dirname(__file__), "schema.sql")
+# Tables of the TCF measurement (tcfmeasure/); created next to the BannerClick/OpenWPM tables.
+TCF_SCHEMA_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "tcfmeasure", "schema.sql")
 
 
 def extract_domain(url: str) -> str:
@@ -78,6 +80,9 @@ class BCSQLiteStorageProvider(StructuredStorageProvider):
         """Create tables (if this is a new database)"""
         with open(SCHEMA_FILE, "r") as f:
             self.db.executescript(f.read())
+        if os.path.exists(TCF_SCHEMA_FILE):
+            with open(TCF_SCHEMA_FILE, "r") as f:
+                self.db.executescript(f.read())
         self.db.commit()
 
     async def flush_cache(self) -> None:

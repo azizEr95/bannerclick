@@ -70,9 +70,73 @@ Each run creates a directory under `datadir/tcfmeasure/prefilter-<timestamp>/` w
 | File | Content |
 | --- | --- |
 | `prefilter.sqlite` / `prefilter.csv` | one row per domain with all check results |
-| `funnel.csv` | input → HTTP usable → robots allowed → reachable → TCF present → ping → cmpLoaded → gdprApplies |
+| `funnel.csv` | input → HTTP usable → robots allowed → reachable → not bot-blocked → TCF present → ping → cmpLoaded → gdprApplies |
 | `notes.csv` | robots exclusions, robots decisions where urllib differs, bot blocks the browser got past, redirects, duplicates |
 | `tcf_sites.csv` | domains with `cmpLoaded` and `gdprApplies`; this is the input for the main measurement |
 | `run_metadata.json` | date, IP country, Git commit, browser/geckodriver/Selenium/OpenWPM versions, config, Tranco list |
 
 For comparison, Matte et al. report for .de: 1000 domains → 881 reachable → 56 with a TCF banner (6.4 %).
+
+## C) Main measurement
+
+```bash
+python -m tcfmeasure.crawl datadir/tcfmeasure/prefilter-<...>/tcf_sites.csv   # OpenWPM, Linux server
+python -m tcfmeasure.local_run <tcf_sites.csv> --limit 5                     # same logic, plain Selenium (tests)
+```
+
+Each site is visited once per variant, and every visit uses a fresh profile. The variants run in
+rounds: first every site is visited with *reject*, then with *accept*, then with *settings*. That
+way the visits to one site are spread out over time, which triggers fewer bot blocks. One visit
+([`visit.py`](visit.py)) goes through these steps:
+
+1. Navigate without waiting for the load event, then stay 60 s on the page. The `__tcfapi`
+   listener is registered as soon as the API exists ([`js/tcf_listener.js`](js/tcf_listener.js)),
+   and every event is stored in `tcf_events`.
+2. Snapshot `before` (V1): the last event before any click. Next to it, the TC string from the
+   cookie `euconsent-v2` (or localStorage). `storage_matches_api` marks where the two differ.
+3. Action:
+   - **reject** ([`reject.py`](reject.py), Matte et al. Appendix D): level 1 reject < "only
+     necessary" < level 2 ("Alle ablehnen"/"Alle abwählen", otherwise deselect every enabled
+     purpose switch, then the least consenting closing button). Labels with an accept word are
+     never clicked. The single exception is "Nur notwendige akzeptieren".
+     `reject_level` = 1 / 2 / none / cookiewall / unklar.
+   - **accept** ([`accept.py`](accept.py)): "Alle akzeptieren" on level 1.
+   - **settings**: opens level 2, takes screenshots and counts preselected switches (V3). Nothing
+     is saved.
+   - **Cookiewalls** ([`cookiewall.py`](cookiewall.py)): in the reject variant nothing is clicked.
+     The accept variant runs normally.
+4. Snapshot `after_action` from the `useractioncomplete` event. Many CMPs reload the page after
+   the choice, so the watcher in [`tcf_signal.py`](tcf_signal.py) notices when that happens.
+5. Reload after 3 s, then snapshot `reload`. If no event carries the decision, the TC string from
+   cookie/localStorage is stored instead. `signal_source` = `after_action` / `reload` / `cookie`.
+
+Block pages are marked `bot_blocked` ([`botblock.py`](botblock.py)). Requests with
+`gdpr_consent` (GET and POST) and TCF cookies are in OpenWPM's `http_requests` and
+`javascript_cookies` tables, under the same `visit_id`. The new tables are described in
+[`schema.sql`](schema.sql).
+
+## D) Decoding TC strings
+
+```bash
+(cd tcfmeasure/tcstring && npm ci)    # once
+python -m tcfmeasure.decode datadir/tcfmeasure/crawl-<...>/crawl-data.sqlite
+```
+
+Every TC string, whether it came from `__tcfapi` or from cookie/localStorage, is decoded into
+`tc_decoded`. The decoder is [@iabtechlabtcf/core](https://github.com/InteractiveAdvertisingBureau/iabtcf-es)
+(version pinned in `tcstring/package.json`). It is the IAB Tech Lab's own implementation of the
+TCF v2.2 spec and is still maintained.
+
+## Semi-automatic mode and accuracy check
+
+```bash
+python -m tcfmeasure.sample <tcf_sites.csv> --n 30          # random sample, seed stored
+python -m tcfmeasure.manual <sample.csv>                    # visible Firefox, a person clicks
+python -m tcfmeasure.compare <crawl-data.sqlite> <manual tcf.sqlite>
+```
+
+[`manual.py`](manual.py) runs the same visit as the crawler, but a person makes the clicks and
+answers questions in the terminal: level, number of switches deselected, whether anything was
+preselected. [`compare.py`](compare.py) writes `comparison.csv` and `comparison_summary.csv`,
+which hold the accuracy of the crawler per field. The steps for the pilot are in
+[`PILOT.md`](PILOT.md).
