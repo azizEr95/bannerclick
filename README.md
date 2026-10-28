@@ -37,6 +37,11 @@ python demo.py --bannerclick --headless --num-browsers 8 --num-repetitions 5 ./b
 
 Note that it is also possible to run BannerClick as an independent module from OpenWPM. To do this please take a look at the instructions [here](https://github.com/bannerclick/bannerclick/tree/bannerclick_v0.18.0/bannerclick#banner-detection-package).
 
+## TCF v2.2 measurement (tcfmeasure)
+
+The TCF v2.2 re-measurement of Matte et al. (2020) for .de websites lives in [`tcfmeasure/`](tcfmeasure/README.md).
+Its README explains how to select the websites, run the prefilter crawl and what each run records.
+
 ## Configuration
 
 Aside from the [configuration](https://github.com/openwpm/OpenWPM/blob/master/docs/Configuration.md) for OpenWPM, there are other parameters that can be modified in [`config.py`](https://github.com/bannerclick/bannerclick/blob/bannerclick_v0.18.0/bannerclick/config.py) to configure BannerClick. Each parameter is documented in the file directly. For example, `MOBILE_AGENT` can be set to simulate a mobile agent.

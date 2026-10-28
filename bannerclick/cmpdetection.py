@@ -54,35 +54,76 @@ def get___tcfapiLocator():
     return driver.find_elements(By.XPATH, "//iframe[contains(@name, '__tcfapiLocator')]")
 
 
-def get_TCData():
+TCF_TIMEOUT = 5  # seconds to wait for the CMP to answer a __tcfapi call
+
+
+def run_tcfapi_async(js_body, timeout=TCF_TIMEOUT):
+    """Run js_body as an async script. js_body must call done(result) exactly once;
+    it is also given up after timeout seconds and then yields None."""
     global driver
-    TCData = None
+    result = None
+    old_timeout = None
     try:
-        TCData = driver.execute_script(
-            'return __tcfapi("getTCData", 2, function(data,success){return data;});',
-            None)
+        old_timeout = driver.timeouts.script
+    except Exception:
+        pass
+    try:
+        driver.set_script_timeout(timeout + 1)
+        result = driver.execute_async_script("""
+            const done = arguments[arguments.length - 1];
+            if (typeof __tcfapi !== 'function') { done(null); return; }
+            const timer = setTimeout(() => done(null), %d);
+            const finish = (res) => { clearTimeout(timer); done(res); };
+            %s
+        """ % (timeout * 1000, js_body))
     except JavascriptException as e:
-        # print("Exception while calling __cmp(): %s" % e)
+        # print("Exception while calling __tcfapi(): %s" % e)
         pass
     except TimeoutException as e:
-        # print("Timeout exception while calling __cmp(): %s" % e)
+        # print("Timeout exception while calling __tcfapi(): %s" % e)
         pass
-    return TCData
+    finally:
+        if old_timeout is not None:
+            try:
+                driver.set_script_timeout(old_timeout)
+            except Exception:
+                pass
+    return result
+
+
+def get_TCData():
+    """Read the current TCF signal via __tcfapi('addEventListener'), which replaces the
+    deprecated getTCData since TCF v2.2. The listener fires right away with the current state.
+    Consent maps are reduced to comma-separated lists of the IDs that are true."""
+    return run_tcfapi_async("""
+        const ids = (o) => o ? Object.keys(o).filter(k => o[k] === true).join(',') : null;
+        __tcfapi('addEventListener', 2, (tcData, success) => {
+            if (!success || !tcData) { finish(null); return; }
+            if (tcData.listenerId !== undefined && tcData.listenerId !== null) {
+                try { __tcfapi('removeEventListener', 2, () => {}, tcData.listenerId); } catch (e) {}
+            }
+            const purpose = tcData.purpose || {};
+            const vendor = tcData.vendor || {};
+            finish({
+                tc_string: tcData.tcString || null,
+                tcf_gdpr_applies: tcData.gdprApplies === undefined ? null : tcData.gdprApplies,
+                tcf_event_status: tcData.eventStatus || null,
+                tcf_cmp_status: tcData.cmpStatus || null,
+                tcf_policy_version: tcData.tcfPolicyVersion === undefined ? null : tcData.tcfPolicyVersion,
+                tcf_cmp_id: tcData.cmpId === undefined ? null : tcData.cmpId,
+                tcf_purpose_consents: ids(purpose.consents),
+                tcf_purpose_li: ids(purpose.legitimateInterests),
+                tcf_vendor_consents: ids(vendor.consents),
+                tcf_vendor_li: ids(vendor.legitimateInterests),
+            });
+        });
+    """)
 
 
 def get_pingReturn():
-    global driver
-    ping_return = None
-    try:
-        ping_return = driver.execute_script(
-            '__tcfapi("ping", 2, (pingReturn) => {v = pingReturn;}); return v;', None)
-    except JavascriptException as e:
-        # print("Exception while calling __cmp(): %s" % e)
-        pass
-    except TimeoutException as e:
-        # print("Timeout exception while calling __cmp(): %s" % e)
-        pass
-    return ping_return
+    return run_tcfapi_async("""
+        __tcfapi('ping', 2, (pingReturn) => finish(pingReturn || null));
+    """)
 
 
 def extract_CMP_list_from_server():
@@ -252,10 +293,23 @@ def set_database(db=None):
             'cmp_id': pd.Series([], dtype='int'),
             'cmp_name': pd.Series([], dtype='str'),
             'pv': pd.Series([], dtype='bool'),
+            'tc_string': pd.Series([], dtype='str'),
+            'tcf_gdpr_applies': pd.Series([], dtype='object'),
+            'tcf_event_status': pd.Series([], dtype='str'),
+            'tcf_cmp_status': pd.Series([], dtype='str'),
+            'tcf_policy_version': pd.Series([], dtype='object'),
+            'tcf_purpose_consents': pd.Series([], dtype='str'),
+            'tcf_purpose_li': pd.Series([], dtype='str'),
+            'tcf_vendor_consents': pd.Series([], dtype='str'),
+            'tcf_vendor_li': pd.Series([], dtype='str'),
         })
     else:
         visit_db = db
     return visit_db
+
+
+TCDATA_KEYS = ['tc_string', 'tcf_gdpr_applies', 'tcf_event_status', 'tcf_cmp_status', 'tcf_policy_version',
+               'tcf_purpose_consents', 'tcf_purpose_li', 'tcf_vendor_consents', 'tcf_vendor_li']
 
 
 def detect_cmp(CMP):
@@ -263,6 +317,12 @@ def detect_cmp(CMP):
     CMP["__tcfapi"] = has___tcfapi()
     CMP["__tcfapiLocator"] = has___tcfapiLocator()
     CMP["cmp_id"] = get_CMP_id()
+    if CMP["__tcfapi"]:
+        tc_data = get_TCData() or {}
+        for key in TCDATA_KEYS:
+            CMP[key] = tc_data.get(key)
+        if CMP["cmp_id"] is None:
+            CMP["cmp_id"] = tc_data.get("tcf_cmp_id")
     CMP["cmp_name"] = get_CMP_name_by_id(str(CMP["cmp_id"]))
     CMP["pv"] = is_CMP_pv(str(CMP["cmp_id"]))
 

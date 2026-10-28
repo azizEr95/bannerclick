@@ -655,6 +655,15 @@ def set_database(v_db, b_db, h_db):
             'cmp_id': pd.Series([], dtype='int'),
             'cmp_name': pd.Series([], dtype='str'),
             'pv': pd.Series([], dtype='bool'),
+            'tc_string': pd.Series([], dtype='str'),
+            'tcf_gdpr_applies': pd.Series([], dtype='object'),
+            'tcf_event_status': pd.Series([], dtype='str'),
+            'tcf_cmp_status': pd.Series([], dtype='str'),
+            'tcf_policy_version': pd.Series([], dtype='object'),
+            'tcf_purpose_consents': pd.Series([], dtype='str'),
+            'tcf_purpose_li': pd.Series([], dtype='str'),
+            'tcf_vendor_consents': pd.Series([], dtype='str'),
+            'tcf_vendor_li': pd.Series([], dtype='str'),
             'dnsmpi': pd.Series([], dtype='str'),
             'body_html': pd.Series([], dtype='str'),
         })
@@ -1534,34 +1543,9 @@ def halt_for_sleep(start_time, time_to_wait):
 
 
 
-def enter_user_pass(driver):
-    wait = WebDriverWait(driver, 3)
-    email_in = wait.until(ec.visibility_of_element_located(
-        (By.XPATH, '//*[@id="email"]')))
-    pass_in = driver.find_element(By.XPATH, '//*[@id="password"]')
-    email_in.send_keys("aarasaa01@gmail.com")
-    pass_in.send_keys("@ASD123123asd")
-    login_btn = driver.find_element(
-        By.XPATH, '/html/body/div[1]/div/div[2]/div/div/div[1]/div[2]/div/div[1]/form/button')
-    login_btn.click()
-
-
 def click_on_contentpass_continue(driver, i):
-    try:
-        click_continue_btn(driver, i)
-        return True
-    except:
-        try:
-            take_current_page_sc(suffix=suffix(6) + "_after" + str(i + 1))
-            enter_user_pass(driver)
-            click_continue_btn(driver, i)
-            return True
-        except Exception as ex:
-            with open(log_file, 'a+') as f:
-                print("failed in clicking on contentpass continue for : " + this_url + " in interact with banner. " + ex.__str__(),
-                      file=f)
-                MyExceptionLogger(err=ex, file=f)
-            return False
+    # contentpass login disabled: the measurement never logs in to any account.
+    return False
 
 
 def click_continue_btn(driver, i):

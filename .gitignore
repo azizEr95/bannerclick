@@ -95,3 +95,10 @@ node_modules
 
 datadir
 bannerclick/CookieSrcSaver/*
+
+# Crawl output outside datadir: screenshots, logs, browser state
+banner_screenshots/
+screenshots/
+logs.txt
+banners_log.txt
+statefiles/
